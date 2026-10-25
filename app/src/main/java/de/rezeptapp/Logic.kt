@@ -268,3 +268,23 @@ object ShoppingCategories {
         return "Sonstiges"
     }
 }
+
+/** Einkaufsliste als gut lesbarer Text fuer Messenger. */
+object ShoppingFormatter {
+    private val icons = mapOf(
+        "Obst & Gemüse" to "🥕", "Brot & Backwaren" to "🥖", "Kühlregal" to "🧀", "Fleisch & Fisch" to "🥩",
+        "Vorrat" to "🥫", "Gewürze & Öl" to "🧂", "Getränke" to "🥤", "Tiefkühl" to "🧊", "Sonstiges" to "🛍️",
+    )
+
+    fun format(items: List<ShoppingItem>, date: java.time.LocalDate = java.time.LocalDate.now()): String {
+        val open = items.filterNot { it.done }
+        if (open.isEmpty()) return "🛒 Einkaufsliste: alles erledigt"
+        val header = "🛒 Einkaufsliste vom ${date.dayOfMonth}.${date.monthValue}. (${open.size} Artikel)"
+        val body = open.groupBy { it.category }
+            .toSortedMap(compareBy<String> { ShoppingCategories.ORDER.indexOf(it).let { i -> if (i < 0) 99 else i } })
+            .entries.joinToString("\n\n") { (cat, list) ->
+                "${icons[cat] ?: "•"} $cat\n" + list.joinToString("\n") { "▢ ${it.text}" }
+            }
+        return "$header\n\n$body"
+    }
+}

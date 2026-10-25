@@ -1,6 +1,5 @@
 package de.rezeptapp.ui
 
-import android.content.Intent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -31,6 +30,7 @@ fun ShoppingScreen(onBack: (() -> Unit)? = null) {
     val items by ShoppingStore.items.collectAsStateWithLifecycle()
     var input by remember { mutableStateOf("") }
     var confirmClear by remember { mutableStateOf(false) }
+    var showShare by remember { mutableStateOf(false) }
 
     fun addInput() {
         if (input.isNotBlank()) ShoppingStore.add(input.split(",", "\n"))
@@ -39,11 +39,7 @@ fun ShoppingScreen(onBack: (() -> Unit)? = null) {
 
     Scaffold(topBar = {
         Bar("Einkaufsliste", onBack) {
-            IconButton(onClick = {
-                ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                    type = "text/plain"; putExtra(Intent.EXTRA_TEXT, ShoppingStore.asText())
-                }, "Einkaufsliste teilen"))
-            }, enabled = items.any { !it.done }) { Icon(Icons.Default.Share, "Teilen") }
+            IconButton(onClick = { showShare = true }, enabled = items.any { !it.done }) { Icon(Icons.Default.Share, "Teilen") }
             IconButton(onClick = { confirmClear = true }, enabled = items.isNotEmpty()) { Icon(Icons.Default.DeleteSweep, "Liste leeren") }
         }
     }) { pad ->
@@ -65,6 +61,11 @@ fun ShoppingScreen(onBack: (() -> Unit)? = null) {
                 }
                 Spacer(Modifier.height(8.dp))
             }
+            if (items.any { !it.done }) item {
+                Button(onClick = { showShare = true }, Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.Share, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Liste teilen (WhatsApp, Signal ...)")
+                }
+            }
             if (items.isEmpty()) item {
                 Text("Die Liste ist leer. Im Rezept auf \"Auf die Einkaufsliste\" tippen oder oben etwas eintragen.",
                     color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 24.dp))
@@ -85,6 +86,7 @@ fun ShoppingScreen(onBack: (() -> Unit)? = null) {
             }
         }
     }
+    if (showShare) ShareDialog("Einkaufsliste teilen", ShoppingStore.asText()) { showShare = false }
     if (confirmClear) AlertDialog(
         onDismissRequest = { confirmClear = false },
         title = { Text("Ganze Liste leeren?") },

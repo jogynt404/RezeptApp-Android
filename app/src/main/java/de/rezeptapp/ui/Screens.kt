@@ -213,6 +213,7 @@ fun DetailScreen(id: Long, onBack: () -> Unit, onRedo: () -> Unit, onEdit: () ->
     var showRaw by remember { mutableStateOf(false) }
     var showShopping by remember { mutableStateOf(false) }
     var showPlan by remember { mutableStateOf(false) }
+    var shareText by remember { mutableStateOf<String?>(null) }
     val base = r?.data?.servings?.let { Scaler.baseServings(it) }
     // Bei bekannter Portionszahl wird in Portionen gezaehlt, sonst als Faktor
     var portions by remember(id, base) { mutableIntStateOf(base ?: 1) }
@@ -225,12 +226,9 @@ fun DetailScreen(id: Long, onBack: () -> Unit, onRedo: () -> Unit, onEdit: () ->
             if (r != null) {
                 IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, "Bearbeiten") }
                 IconButton(onClick = {
-                    val text = if (factor == 1.0) r.toMarkdown() else r.copy(data = r.data?.let { dd ->
+                    shareText = if (factor == 1.0) r.toMarkdown() else r.copy(data = r.data?.let { dd ->
                         dd.copy(ingredients = scaled, servings = if (base != null) "$portions Portionen" else dd.servings)
                     }).toMarkdown()
-                    ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"; putExtra(Intent.EXTRA_SUBJECT, r.title); putExtra(Intent.EXTRA_TEXT, text)
-                    }, "Rezept teilen"))
                 }) { Icon(Icons.Default.Share, "Teilen") }
                 IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Default.Delete, "Löschen") }
             }
@@ -315,6 +313,7 @@ fun DetailScreen(id: Long, onBack: () -> Unit, onRedo: () -> Unit, onEdit: () ->
     )
     if (showShopping && r != null) AddToShoppingDialog(r.title, scaled) { showShopping = false }
     if (showPlan && r != null) AddToPlanDialog(r.id) { showPlan = false }
+    shareText?.let { t -> ShareDialog("Rezept teilen", t, subject = r?.title) { shareText = null } }
 }
 
 @OptIn(ExperimentalLayoutApi::class)

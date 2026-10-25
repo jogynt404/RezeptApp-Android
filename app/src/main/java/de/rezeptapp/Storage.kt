@@ -324,10 +324,7 @@ object ShoppingStore {
 
     fun replaceAll(list: List<ShoppingItem>) = write(list)
 
-    fun asText(): String = _items.value.filterNot { it.done }
-        .groupBy { it.category }
-        .toSortedMap(compareBy<String> { ShoppingCategories.ORDER.indexOf(it).let { i -> if (i < 0) 99 else i } })
-        .entries.joinToString("\n\n") { (cat, list) -> "$cat\n" + list.joinToString("\n") { "☐ ${it.text}" } }
+    fun asText(): String = ShoppingFormatter.format(_items.value)
 }
 
 /** Sicherung aller Rezepte und der Einkaufsliste in einer Datei. */
