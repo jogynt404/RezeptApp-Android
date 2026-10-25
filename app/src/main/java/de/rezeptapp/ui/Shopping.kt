@@ -26,7 +26,7 @@ import de.rezeptapp.ShoppingCategories
 import de.rezeptapp.ShoppingStore
 
 @Composable
-fun ShoppingScreen(onBack: () -> Unit) {
+fun ShoppingScreen(onBack: (() -> Unit)? = null) {
     val ctx = LocalContext.current
     val items by ShoppingStore.items.collectAsStateWithLifecycle()
     var input by remember { mutableStateOf("") }

@@ -75,11 +75,10 @@ internal fun Bar(title: String, onBack: (() -> Unit)? = null, actions: @Composab
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun HomeScreen(onOpen: (Long) -> Unit, onSettings: () -> Unit, onShopping: () -> Unit, onImport: (String, Boolean) -> Unit) {
+fun HomeScreen(onOpen: (Long) -> Unit, onSettings: () -> Unit, onImport: (String, Boolean) -> Unit) {
     val ctx = LocalContext.current
     val recipes by RecipeStore.recipes.collectAsStateWithLifecycle()
     val job by ImportService.state.collectAsStateWithLifecycle()
-    val shopping by ShoppingStore.items.collectAsStateWithLifecycle()
     val clipboard = LocalClipboardManager.current
     var url by remember { mutableStateOf("") }
     var audio by remember { mutableStateOf(false) }
@@ -87,13 +86,9 @@ fun HomeScreen(onOpen: (Long) -> Unit, onSettings: () -> Unit, onShopping: () ->
     var tagFilter by remember { mutableStateOf<String?>(null) }
     val modelsMissing = ModelManager.llmPath(ctx) == null
     val allTags = remember(recipes) { recipes.flatMap { it.tags }.distinct().sortedBy { it.lowercase() } }
-    val openItems = shopping.count { !it.done }
 
     Scaffold(topBar = {
         Bar("RezeptApp") {
-            IconButton(onClick = onShopping) {
-                BadgedBox(badge = { if (openItems > 0) Badge { Text("$openItems") } }) { Icon(Icons.Default.ShoppingCart, "Einkaufsliste") }
-            }
             IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, "Einstellungen") }
         }
     }) { pad ->
@@ -217,6 +212,7 @@ fun DetailScreen(id: Long, onBack: () -> Unit, onRedo: () -> Unit, onEdit: () ->
     var confirmDelete by remember { mutableStateOf(false) }
     var showRaw by remember { mutableStateOf(false) }
     var showShopping by remember { mutableStateOf(false) }
+    var showPlan by remember { mutableStateOf(false) }
     val base = r?.data?.servings?.let { Scaler.baseServings(it) }
     // Bei bekannter Portionszahl wird in Portionen gezaehlt, sonst als Faktor
     var portions by remember(id, base) { mutableIntStateOf(base ?: 1) }
@@ -280,8 +276,13 @@ fun DetailScreen(id: Long, onBack: () -> Unit, onRedo: () -> Unit, onEdit: () ->
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
             }
-            if (scaled.isNotEmpty()) FilledTonalButton(onClick = { showShopping = true }) {
-                Icon(Icons.Default.AddShoppingCart, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Auf die Einkaufsliste")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (scaled.isNotEmpty()) FilledTonalButton(onClick = { showShopping = true }) {
+                    Icon(Icons.Default.AddShoppingCart, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Einkaufsliste")
+                }
+                FilledTonalButton(onClick = { showPlan = true }) {
+                    Icon(Icons.Default.CalendarMonth, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Einplanen")
+                }
             }
 
             SectionTitle("Zubereitung")
@@ -313,6 +314,46 @@ fun DetailScreen(id: Long, onBack: () -> Unit, onRedo: () -> Unit, onEdit: () ->
         dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Abbrechen") } },
     )
     if (showShopping && r != null) AddToShoppingDialog(r.title, scaled) { showShopping = false }
+    if (showPlan && r != null) AddToPlanDialog(r.id) { showPlan = false }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AddToPlanDialog(recipeId: Long, onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    val today = remember { java.time.LocalDate.now() }
+    val fmt = remember { java.time.format.DateTimeFormatter.ofPattern("EEE d.M.", Locale.GERMAN) }
+    var day by remember { mutableStateOf(today) }
+    var slot by remember { mutableStateOf("Abendessen") }
+    val entries by MealPlanStore.entries.collectAsStateWithLifecycle()
+    val taken = entries.firstOrNull { it.date == day.toString() && it.slot == slot }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Einplanen") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Tag", fontWeight = FontWeight.SemiBold)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    (0L until 14L).map { today.plusDays(it) }.forEach { d ->
+                        FilterChip(selected = d == day, onClick = { day = d }, label = { Text(if (d == today) "Heute" else d.format(fmt)) })
+                    }
+                }
+                Text("Mahlzeit", fontWeight = FontWeight.SemiBold)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    MealEntry.SLOTS.forEach { s -> FilterChip(selected = s == slot, onClick = { slot = s }, label = { Text(s) }) }
+                }
+                if (taken != null) Text("Ersetzt den vorhandenen Eintrag.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                MealPlanStore.set(day.toString(), slot, recipeId)
+                Toast.makeText(ctx, "Eingeplant: $slot, ${if (day == today) "heute" else day.format(fmt)}", Toast.LENGTH_SHORT).show()
+                onClose()
+            }) { Text("Einplanen") }
+        },
+        dismissButton = { TextButton(onClick = onClose) { Text("Abbrechen") } },
+    )
 }
 
 /** Quell-Link: Plattform-Name und vollstaendige Adresse, antippen oeffnet, lang druecken kopiert. */

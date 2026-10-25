@@ -30,6 +30,8 @@ class App : Application() {
         super.onCreate()
         RecipeStore.init(this)
         ShoppingStore.init(this)
+        MealPlanStore.init(this)
+        PantryStore.init(this)
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(ImportService.CHANNEL, "Rezepte auslesen", NotificationManager.IMPORTANCE_LOW))
         nm.createNotificationChannel(NotificationChannel(ImportService.CHANNEL_DONE, "Rezept fertig", NotificationManager.IMPORTANCE_DEFAULT))

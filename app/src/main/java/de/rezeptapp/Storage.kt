@@ -41,6 +41,7 @@ object RecipeStore {
     fun delete(id: Long) {
         File(dir, "$id.json").delete()
         reload()
+        runCatching { MealPlanStore.dropRecipe(id) }
     }
 }
 
@@ -60,6 +61,19 @@ class Settings(ctx: Context) {
     var preferGpu: Boolean
         get() = p.getBoolean("gpu", true)
         set(v) = p.edit().putBoolean("gpu", v).apply()
+
+    /** Personen im Haushalt, fuer Einkaufslisten aus dem Essensplan */
+    var household: Int
+        get() = p.getInt("haushalt", 2)
+        set(v) = p.edit().putInt("haushalt", v).apply()
+
+    var planSlots: Set<String>
+        get() = p.getStringSet("plan_slots", setOf("Abendessen")) ?: setOf("Abendessen")
+        set(v) = p.edit().putStringSet("plan_slots", v).apply()
+
+    var assumeStaples: Boolean
+        get() = p.getBoolean("grundzutaten", true)
+        set(v) = p.edit().putBoolean("grundzutaten", v).apply()
 
     var lastYtdlpUpdate: Long
         get() = p.getLong("ytdlp_update", 0L)
@@ -326,6 +340,8 @@ object Backup {
             .put("exportiert", System.currentTimeMillis())
             .put("rezepte", org.json.JSONArray(recipes.map { it.toJson() }))
             .put("einkaufsliste", org.json.JSONArray(ShoppingStore.items.value.map { it.toJson() }))
+            .put("essensplan", org.json.JSONArray(MealPlanStore.entries.value.map { it.toJson() }))
+            .put("vorrat", org.json.JSONArray(PantryStore.items.value))
         ctx.contentResolver.openOutputStream(uri, "wt")!!.use { it.write(root.toString(2).toByteArray(Charsets.UTF_8)) }
         return recipes.size
     }
@@ -348,6 +364,91 @@ object Backup {
                 ShoppingStore.replaceAll((0 until a.length()).map { ShoppingItem.fromJson(a.getJSONObject(it)) })
             }
         }
+        root.optJSONArray("essensplan")?.let { a ->
+            if (MealPlanStore.entries.value.isEmpty() && a.length() > 0) {
+                MealPlanStore.replaceAll((0 until a.length()).map { MealEntry.fromJson(a.getJSONObject(it)) })
+            }
+        }
+        root.optJSONArray("vorrat")?.let { a -> PantryStore.add((0 until a.length()).map { a.getString(it) }) }
         return count
     }
+}
+
+/** Essensplan als JSON-Datei. */
+object MealPlanStore {
+    private lateinit var file: File
+    private val _entries = MutableStateFlow<List<MealEntry>>(emptyList())
+    val entries: StateFlow<List<MealEntry>> = _entries
+    private var nextId = System.currentTimeMillis()
+
+    fun init(ctx: Context) {
+        file = File(ctx.filesDir, "essensplan.json")
+        _entries.value = runCatching {
+            val arr = org.json.JSONArray(file.readText())
+            (0 until arr.length()).map { MealEntry.fromJson(arr.getJSONObject(it)) }
+        }.getOrDefault(emptyList())
+    }
+
+    @Synchronized
+    private fun write(list: List<MealEntry>) {
+        _entries.value = list.sortedWith(compareBy({ it.date }, { MealEntry.SLOTS.indexOf(it.slot) }))
+        file.writeText(org.json.JSONArray(_entries.value.map { it.toJson() }).toString(2))
+    }
+
+    fun forDate(date: String) = _entries.value.filter { it.date == date }
+
+    /** Setzt einen Platz (ersetzt einen vorhandenen Eintrag fuer Datum und Mahlzeit). */
+    fun set(date: String, slot: String, recipeId: Long?, text: String = "") {
+        val rest = _entries.value.filterNot { it.date == date && it.slot == slot }
+        write(rest + MealEntry(nextId++, date, slot, recipeId, text))
+    }
+
+    fun remove(id: Long) = write(_entries.value.filterNot { it.id == id })
+
+    /** Fuegt erzeugte Eintraege ein und ersetzt dabei gleiche Plaetze. */
+    fun putAll(list: List<MealEntry>) {
+        val keys = list.map { it.date to it.slot }.toSet()
+        write(_entries.value.filterNot { (it.date to it.slot) in keys } + list)
+    }
+
+    fun clearRange(dates: Collection<String>) = write(_entries.value.filterNot { it.date in dates })
+
+    fun replaceAll(list: List<MealEntry>) = write(list)
+
+    /** Rezepte, die nicht mehr existieren, aus dem Plan entfernen. */
+    fun dropRecipe(recipeId: Long) = write(_entries.value.filterNot { it.recipeId == recipeId })
+}
+
+/** Vorhandene Lebensmittel. */
+object PantryStore {
+    private lateinit var file: File
+    private val _items = MutableStateFlow<List<String>>(emptyList())
+    val items: StateFlow<List<String>> = _items
+
+    fun init(ctx: Context) {
+        file = File(ctx.filesDir, "vorrat.json")
+        _items.value = runCatching {
+            val arr = org.json.JSONArray(file.readText())
+            (0 until arr.length()).map { arr.getString(it) }
+        }.getOrDefault(emptyList())
+    }
+
+    @Synchronized
+    private fun write(list: List<String>) {
+        _items.value = list
+        file.writeText(org.json.JSONArray(list).toString(2))
+    }
+
+    fun add(texts: List<String>) {
+        val cur = _items.value
+        val fresh = texts.map { it.trim() }.filter { it.isNotEmpty() }.distinctBy { it.lowercase() }
+            .filter { t -> cur.none { it.equals(t, ignoreCase = true) } }
+        write(cur + fresh)
+    }
+
+    fun remove(item: String) = write(_items.value.filterNot { it == item })
+
+    fun clear() = write(emptyList())
+
+    fun replaceAll(list: List<String>) = write(list)
 }

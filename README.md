@@ -17,7 +17,10 @@ Liest Rezepte aus Instagram-, TikTok- und Facebook-Posts aus. Die KI läuft **ko
 - **Portionen umrechnen:** Mit Plus und Minus passen sich alle Mengen an.
 - **Einkaufsliste:** Zutaten aus Rezepten übernehmen, nach Supermarkt-Abteilung sortiert, abhaken und teilen.
 - **Kategorien:** Rezepte mit Schlagwörtern versehen und danach filtern.
-- **Sicherung:** Alle Rezepte und die Einkaufsliste als Datei sichern und wieder einlesen.
+- **Sicherung:** Rezepte, Einkaufsliste, Essensplan und Vorrat als Datei sichern und wieder einlesen.
+- **Deutsch und Einheiten:** Rezepte werden übersetzt und auf °C, g, ml, EL, TL und cm umgerechnet. Der Link zum Quellvideo bleibt erhalten.
+- **Essensplan:** Ansicht für Tag, Woche und Monat. Rezepte selbst einplanen oder den Plan automatisch erstellen lassen (abwechslungsreich, optional nach Kategorie oder Vorrat). Zutaten des Plans mit einem Tipp auf die Einkaufsliste, auf die Personenzahl umgerechnet und zusammengefasst.
+- **Vorrat:** Vorhandene Lebensmittel eintragen und die passendsten Rezepte vorgeschlagen bekommen, inklusive "Es fehlt" und Einkaufsliste für fehlende Zutaten.
 
 Internet braucht die App nur zum Abrufen des Posts und einmalig zum Laden der Modelle.
 
