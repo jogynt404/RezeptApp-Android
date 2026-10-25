@@ -10,6 +10,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -209,7 +210,7 @@ private fun JobCard(job: JobState, onOpen: (Long) -> Unit) {
 // ---------------- Rezept ----------------
 
 @Composable
-fun DetailScreen(id: Long, onBack: () -> Unit, onRedo: () -> Unit, onEdit: () -> Unit) {
+fun DetailScreen(id: Long, onBack: () -> Unit, onRedo: () -> Unit, onEdit: () -> Unit, onTranslate: () -> Unit) {
     val ctx = LocalContext.current
     val recipes by RecipeStore.recipes.collectAsStateWithLifecycle()
     val r = recipes.firstOrNull { it.id == id }
@@ -246,10 +247,16 @@ fun DetailScreen(id: Long, onBack: () -> Unit, onRedo: () -> Unit, onEdit: () ->
             val meta = listOfNotNull(d?.time?.takeIf { it.isNotBlank() }, r.author.takeIf { it.isNotBlank() }?.let { "von $it" })
             if (meta.isNotEmpty()) Text(meta.joinToString(" · "), color = MaterialTheme.colorScheme.outline)
             if (r.tags.isNotEmpty()) Text(r.tags.joinToString("  ") { "#$it" }, color = MaterialTheme.colorScheme.primary)
-            TextButton(onClick = { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(r.url))) }, contentPadding = PaddingValues(0.dp)) {
-                Icon(Icons.Default.OpenInNew, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Original öffnen")
-            }
+            SourceLink(r.url)
             r.error?.let { Note(it, error = true) }
+            if (d != null && d.isRecipe && !LanguageDetector.isGerman(d)) {
+                Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(10.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Dieses Rezept ist noch nicht auf Deutsch.", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        TextButton(onClick = onTranslate) { Text("Übersetzen") }
+                    }
+                }
+            }
             if (d?.isRecipe == false) Note("Die KI hat hier kein Rezept gefunden. Probiere \"Video immer anhören\" oder trage es über den Stift selbst ein.")
 
             SectionTitle("Zutaten")
@@ -306,6 +313,44 @@ fun DetailScreen(id: Long, onBack: () -> Unit, onRedo: () -> Unit, onEdit: () ->
         dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Abbrechen") } },
     )
     if (showShopping && r != null) AddToShoppingDialog(r.title, scaled) { showShopping = false }
+}
+
+/** Quell-Link: Plattform-Name und vollstaendige Adresse, antippen oeffnet, lang druecken kopiert. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+internal fun SourceLink(url: String) {
+    val ctx = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val host = remember(url) { runCatching { Uri.parse(url).host.orEmpty().removePrefix("www.").removePrefix("m.") }.getOrDefault("") }
+    val platform = when {
+        host.contains("instagram") -> "Instagram"
+        host.contains("tiktok") -> "TikTok"
+        host.contains("facebook") || host.contains("fb.") -> "Facebook"
+        host.contains("youtu") -> "YouTube"
+        else -> host
+    }
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(10.dp)) {
+        Row(
+            Modifier.fillMaxWidth()
+                .combinedClickable(
+                    onClick = { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } },
+                    onLongClick = {
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(url))
+                        Toast.makeText(ctx, "Link kopiert", Toast.LENGTH_SHORT).show()
+                    },
+                )
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.PlayCircle, null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Quelle: $platform", fontWeight = FontWeight.SemiBold)
+                Text(url, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            Icon(Icons.Default.OpenInNew, "Öffnen", Modifier.size(18.dp))
+        }
+    }
 }
 
 @Composable
@@ -418,6 +463,18 @@ fun SettingsScreen(onBack: () -> Unit, onLogin: () -> Unit) {
                 Button(onClick = onLogin) { Text(if (loggedIn) "Erneut anmelden" else "Bei Instagram anmelden") }
                 if (loggedIn) OutlinedButton(onClick = { CookieExport.clear(ctx); tick++ }) { Text("Abmelden") }
             }
+
+            SectionTitle("Deutsch und Einheiten")
+            Text("Neue Rezepte werden automatisch übersetzt und auf °C, g, ml, EL und TL umgerechnet. Hier lassen sich ältere Rezepte nachträglich umrechnen.", style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(onClick = {
+                var n = 0
+                RecipeStore.recipes.value.forEach { r ->
+                    val d = r.data ?: return@forEach
+                    val c = UnitConverter.convert(d)
+                    if (c != d) { RecipeStore.save(r.copy(data = c)); n++ }
+                }
+                Toast.makeText(ctx, if (n == 0) "Alles schon in deutschen Einheiten" else "$n Rezepte umgerechnet", Toast.LENGTH_LONG).show()
+            }) { Text("Alle Rezepte umrechnen") }
 
             SectionTitle("Sicherung")
             Text("Alle Rezepte und die Einkaufsliste in eine Datei sichern, z. B. in Google Drive oder auf den PC. Beim Einlesen werden gleiche Rezepte ersetzt.", style = MaterialTheme.typography.bodySmall)

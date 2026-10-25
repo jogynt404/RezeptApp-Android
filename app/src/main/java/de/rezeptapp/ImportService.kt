@@ -50,7 +50,7 @@ data class JobState(
 
 /** Vordergrund-Dienst: arbeitet weiter, auch wenn du zurueck zu Instagram wechselst. */
 class ImportService : Service() {
-    private data class Job(val url: String? = null, val forceAudio: Boolean = false, val redoId: Long? = null)
+    private data class Job(val url: String? = null, val forceAudio: Boolean = false, val redoId: Long? = null, val translateId: Long? = null)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val queue = Channel<Job>(Channel.UNLIMITED)
@@ -64,6 +64,7 @@ class ImportService : Service() {
         private const val EXTRA_URL = "url"
         private const val EXTRA_AUDIO = "audio"
         private const val EXTRA_REDO = "redo"
+        private const val EXTRA_TRANSLATE = "translate"
 
         private val _state = MutableStateFlow(JobState())
         val state: StateFlow<JobState> = _state
@@ -73,6 +74,8 @@ class ImportService : Service() {
         }
 
         fun redo(ctx: Context, id: Long) = start(ctx) { putExtra(EXTRA_REDO, id) }
+
+        fun translate(ctx: Context, id: Long) = start(ctx) { putExtra(EXTRA_TRANSLATE, id) }
 
         fun clearResult() {
             _state.value = _state.value.copy(error = null, doneRecipeId = null, warning = null)
@@ -97,6 +100,7 @@ class ImportService : Service() {
         ServiceCompat.startForeground(this, NOTIF_ID, notification("Startet ...", -1), type)
         val job = when {
             intent?.hasExtra(EXTRA_REDO) == true -> Job(redoId = intent.getLongExtra(EXTRA_REDO, 0))
+            intent?.hasExtra(EXTRA_TRANSLATE) == true -> Job(translateId = intent.getLongExtra(EXTRA_TRANSLATE, 0))
             intent?.getStringExtra(EXTRA_URL) != null -> Job(url = intent.getStringExtra(EXTRA_URL), forceAudio = intent.getBooleanExtra(EXTRA_AUDIO, false))
             else -> null
         }
@@ -116,7 +120,11 @@ class ImportService : Service() {
 
     private fun process(job: Job) {
         try {
-            val id = if (job.redoId != null) redo(job.redoId) else import(job.url!!, job.forceAudio)
+            val id = when {
+                job.redoId != null -> redo(job.redoId)
+                job.translateId != null -> translateExisting(job.translateId)
+                else -> import(job.url!!, job.forceAudio)
+            }
             val r = RecipeStore.get(id)
             _state.value = _state.value.copy(running = false, step = "Fertig", progress = -1, doneRecipeId = id, warning = r?.error)
             notifyDone(r)
@@ -144,10 +152,11 @@ class ImportService : Service() {
         val existing = RecipeStore.findByUrl(page.url)
         val parsed = WebRecipeParser.parse(page.html)
         if (parsed != null && parsed.data.isRecipe) {
+            val (data, note) = germanize(parsed.data)
             val r = Recipe(
                 id = existing?.id ?: System.currentTimeMillis(), url = page.url,
-                title = parsed.data.title.ifBlank { WebRecipeParser.title(page.html).ifBlank { "Rezept" } },
-                author = parsed.author, description = text, data = parsed.data,
+                title = data.title.ifBlank { WebRecipeParser.title(page.html).ifBlank { "Rezept" } },
+                author = parsed.author, description = text, data = data, error = note,
                 tags = existing?.tags ?: emptyList(), created = existing?.created ?: System.currentTimeMillis(),
             )
             RecipeStore.save(r)
@@ -200,13 +209,39 @@ class ImportService : Service() {
     private fun structureAndSave(base: Recipe): Long {
         update("KI sortiert Zutaten und Schritte ...")
         val saved = try {
-            val data = Structurer.structure(this, base.sourceText())
-            base.copy(data = data, title = data.title.ifBlank { base.title }, error = null)
+            val (data, note) = germanize(Structurer.structure(this, base.sourceText()))
+            base.copy(data = data, title = data.title.ifBlank { base.title }, error = note)
         } catch (e: UserFacingException) {
             base.copy(error = e.message) // Rohtext trotzdem speichern
         }
         RecipeStore.save(saved)
         return saved.id
+    }
+
+    /**
+     * Deutsche Einheiten (immer, ohne KI) und Uebersetzung (mit KI, falls noetig und moeglich).
+     * Liefert das Rezept und ggf. einen Hinweis, wenn die Uebersetzung nicht geklappt hat.
+     */
+    private fun germanize(input: RecipeData): Pair<RecipeData, String?> {
+        var data = UnitConverter.convert(input)
+        if (LanguageDetector.isGerman(data)) return data to null
+        if (ModelManager.llmPath(this) == null) return data to "Nicht übersetzt: Für die Übersetzung die Sprach-KI in den Einstellungen laden."
+        update("Rezept wird übersetzt ...")
+        return try {
+            data = UnitConverter.convert(Structurer.translate(this, data))
+            data to null
+        } catch (e: UserFacingException) {
+            data to e.message
+        }
+    }
+
+    private fun translateExisting(id: Long): Long {
+        val r = RecipeStore.get(id) ?: throw UserFacingException("Rezept nicht gefunden.")
+        val d = r.data ?: return structureAndSave(r)
+        update("Rezept wird übersetzt ...")
+        val out = UnitConverter.convert(Structurer.translate(this, UnitConverter.convert(d)))
+        RecipeStore.save(r.copy(data = out, title = out.title.ifBlank { r.title }, error = null))
+        return id
     }
 
     private fun openAppIntent(id: Long? = null) = PendingIntent.getActivity(

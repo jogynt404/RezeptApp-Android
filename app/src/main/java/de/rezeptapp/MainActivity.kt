@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
                         onBack = { screen = Screen.Home },
                         onRedo = { ImportService.redo(this, s.id); screen = Screen.Home },
                         onEdit = { screen = Screen.Edit(s.id) },
+                        onTranslate = { ImportService.translate(this, s.id); screen = Screen.Home },
                     )
                     is Screen.Edit -> EditScreen(id = s.id, onDone = { screen = Screen.Detail(s.id) })
                     Screen.Shopping -> ShoppingScreen(onBack = { screen = Screen.Home })

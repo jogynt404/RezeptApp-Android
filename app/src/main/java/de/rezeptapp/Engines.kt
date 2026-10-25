@@ -287,6 +287,28 @@ object Structurer {
         throw UserFacingException("Die KI hat kein lesbares Ergebnis geliefert. Versuche \"Neu auswerten\".", lastError)
     }
 
+    /** Uebersetzt ein bereits strukturiertes Rezept ins Deutsche. */
+    @Synchronized
+    fun translate(ctx: Context, data: RecipeData): RecipeData {
+        val e = engine(ctx)
+        val input = RecipeParser.TRANSLATE_PROMPT + data.toJson().toString()
+        if (input.length > 9000) throw UserFacingException("Das Rezept ist zu lang für die Übersetzung auf dem Handy.")
+        var lastError: Throwable? = null
+        repeat(2) { attempt ->
+            try {
+                val sampler = SamplerConfig(topK = if (attempt == 0) 1 else 20, topP = 0.95, temperature = if (attempt == 0) 0.1 else 0.4)
+                val answer = e.createConversation(ConversationConfig(samplerConfig = sampler)).use { c -> c.sendMessage(input).toString() }
+                val out = RecipeParser.parseLlm(answer)
+                // Plausibilitaet: die Uebersetzung darf keine Zutaten oder Schritte verlieren
+                if (out.ingredients.size >= data.ingredients.size && out.steps.size >= data.steps.size) return out
+                lastError = IllegalStateException("Übersetzung unvollständig")
+            } catch (t: Throwable) {
+                lastError = t
+            }
+        }
+        throw UserFacingException("Die Übersetzung hat nicht geklappt. Das Rezept bleibt in der Originalsprache.", lastError)
+    }
+
     @Synchronized
     fun close() {
         runCatching { engine?.close() }

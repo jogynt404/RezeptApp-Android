@@ -15,9 +15,11 @@ object IngredientParser {
         "päckchen", "packungen", "packung", "pck", "pkg", "bund", "zehen", "zehe",
         "scheiben", "scheibe", "tassen", "tasse", "gläser", "glas", "würfel", "blätter", "blatt",
         "zweige", "zweig", "spritzer", "schuss", "handvoll", "stangen", "stange", "knollen", "knolle",
+        "tablespoons", "tablespoon", "teaspoons", "teaspoon", "fl oz", "fl. oz", "ounces", "ounce",
+        "pounds", "pound", "sticks", "stick", "pints", "pint", "quarts", "quart",
         "cups", "cup", "tbsp", "tsp", "oz", "lbs", "lb", "pinch", "cloves", "clove",
     )
-    private const val NUM = """(?:\d*\s*[½¼¾⅓⅔⅛]|\d+\s+\d+/\d+|\d+/\d+|\d+(?:[.,]\d+)?)"""
+    internal const val NUM = """(?:\d*\s*[½¼¾⅓⅔⅛]|\d+\s+\d+/\d+|\d+/\d+|\d+(?:[.,]\d+)?)"""
     private val amountRe = Regex("""^\s*($NUM(?:\s*(?:-|–|bis)\s*$NUM)?)\s*(.*)$""", RegexOption.IGNORE_CASE)
 
     fun parse(line: String): Ingredient {

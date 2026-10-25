@@ -165,11 +165,18 @@ object RecipeParser {
 Extrahiere daraus das Rezept. Antworte NUR mit gültigem JSON in genau diesem Format:
 {"titel": "kurzer Rezeptname auf Deutsch", "portionen": "z. B. 2 Portionen oder leer", "zeit": "z. B. 30 Min oder leer", "zutaten": [{"menge": "200", "einheit": "g", "zutat": "Mehl"}], "schritte": ["Schritt 1", "Schritt 2"], "hinweise": "Tipps oder leer", "ist_rezept": true}
 Regeln:
-- Schreibe alles auf Deutsch, übersetze bei Bedarf.
+- Schreibe alles auf Deutsch, auch Titel, Zutatennamen und Schritte. Übersetze aus jeder Sprache.
+- Nutze deutsche Einheiten: Grad Celsius statt Fahrenheit, g und ml statt cups, oz und lb, cm statt inch, EL und TL statt tbsp und tsp.
 - Erfinde nichts. Fehlt eine Menge, lass "menge" leer.
 - Ignoriere Hashtags, Werbung, Rabattcodes und Aufforderungen zum Folgen.
 - Enthält der Text kein Rezept, setze "ist_rezept": false und lass die Listen leer.
 
 TEXT:
+"""
+
+    const val TRANSLATE_PROMPT = """Übersetze dieses Rezept vollständig ins Deutsche (Titel, Zutatennamen, Einheiten, Schritte, Hinweise).
+Behalte alle Zahlen und die JSON-Struktur exakt bei. Nutze deutsche Einheiten (°C, g, ml, EL, TL, cm).
+Antworte NUR mit dem übersetzten JSON.
+
 """
 }

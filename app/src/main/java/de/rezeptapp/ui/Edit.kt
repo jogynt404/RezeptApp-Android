@@ -79,6 +79,7 @@ fun EditScreen(id: Long, onDone: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(), label = { Text("Titel") })
+            SourceLink(r.url)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(servings, { servings = it }, Modifier.weight(1f), label = { Text("Portionen") }, placeholder = { Text("z. B. 4 Portionen") }, singleLine = true)
                 OutlinedTextField(time, { time = it }, Modifier.weight(1f), label = { Text("Zeit") }, placeholder = { Text("z. B. 30 Min") }, singleLine = true)
