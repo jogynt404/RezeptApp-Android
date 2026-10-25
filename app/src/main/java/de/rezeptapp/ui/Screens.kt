@@ -269,8 +269,11 @@ fun DetailScreen(id: Long, onBack: () -> Unit, onRedo: () -> Unit, onEdit: () ->
             if (d == null || d.ingredients.isEmpty()) Text("keine erkannt", color = MaterialTheme.colorScheme.outline)
             scaled.forEach { ing ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                    Text(listOf(ing.amount, ing.unit).filter { it.isNotBlank() }.joinToString(" "), fontWeight = FontWeight.Bold, modifier = Modifier.width(90.dp))
-                    Text(ing.name)
+                    // kurze Einheiten (g, EL, Dose) neben die Menge, lange (Knoblauchzehe) zum Namen
+                    val shortUnit = ing.unit.length <= 6
+                    Text(listOf(ing.amount, if (shortUnit) ing.unit else "").filter { it.isNotBlank() }.joinToString(" "),
+                        fontWeight = FontWeight.Bold, modifier = Modifier.width(96.dp))
+                    Text(if (shortUnit || ing.unit.isBlank()) ing.name else "${ing.unit} ${ing.name}".trim())
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
             }

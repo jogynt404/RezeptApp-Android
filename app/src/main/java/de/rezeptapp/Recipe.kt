@@ -131,6 +131,33 @@ object RecipeParser {
         return dataFromJson(JSONObject(clean.substring(start, end + 1)))
     }
 
+    /**
+     * Repariert typische KI-Fehler: Einheit doppelt ("1 EL" + "EL"), Einheit nur im Mengenfeld ("60 g" + ""),
+     * Einheit am Anfang des Namens ("g Mehl").
+     */
+    fun cleanIngredient(ing: Ingredient): Ingredient {
+        var amount = ing.amount.trim()
+        var unit = ing.unit.trim()
+        var name = ing.name.trim()
+        // Einheit steht zusaetzlich am Ende der Menge
+        if (unit.isNotEmpty() && amount.length > unit.length && amount.endsWith(unit, ignoreCase = true)) {
+            amount = amount.dropLast(unit.length).trim()
+        }
+        // Menge enthaelt noch Text: in Zahl und Einheit zerlegen
+        if (amount.any { it.isLetter() } && amount.firstOrNull()?.let { it.isDigit() || it in "½¼¾⅓⅔⅛" } == true) {
+            val p = IngredientParser.parse(amount)
+            if (p.amount.isNotBlank()) {
+                val extra = listOf(p.unit, p.name).filter { it.isNotBlank() }.joinToString(" ")
+                amount = p.amount
+                if (unit.isEmpty()) unit = extra
+                else if (!extra.equals(unit, ignoreCase = true) && extra.isNotEmpty()) name = "$extra $name".trim()
+            }
+        }
+        // Einheit doppelt im Namen ("EL Tomatenmark")
+        if (unit.isNotEmpty() && name.startsWith("$unit ", ignoreCase = true)) name = name.drop(unit.length + 1).trim()
+        return Ingredient(amount, unit, name)
+    }
+
     fun dataFromJson(o: JSONObject): RecipeData {
         fun str(key: String) = if (o.isNull(key)) "" else o.optString(key, "").trim()
         val ingredients = mutableListOf<Ingredient>()
@@ -139,10 +166,10 @@ object RecipeParser {
                 val item = arr.opt(i)
                 if (item is JSONObject) {
                     fun f(k: String) = if (item.isNull(k)) "" else item.opt(k)?.toString()?.trim() ?: ""
-                    val ing = Ingredient(f("menge"), f("einheit"), f("zutat"))
+                    val ing = cleanIngredient(Ingredient(f("menge"), f("einheit"), f("zutat")))
                     if (ing.name.isNotEmpty() || ing.amount.isNotEmpty()) ingredients += ing
                 } else if (item != null && item != JSONObject.NULL) {
-                    ingredients += Ingredient("", "", item.toString().trim())
+                    ingredients += IngredientParser.parse(item.toString().trim())
                 }
             }
         }
@@ -163,10 +190,11 @@ object RecipeParser {
 
     const val PROMPT = """Du bekommst den Text eines Social-Media-Posts (Beschreibung und/oder Transkript eines Kochvideos).
 Extrahiere daraus das Rezept. Antworte NUR mit gültigem JSON in genau diesem Format:
-{"titel": "kurzer Rezeptname auf Deutsch", "portionen": "z. B. 2 Portionen oder leer", "zeit": "z. B. 30 Min oder leer", "zutaten": [{"menge": "200", "einheit": "g", "zutat": "Mehl"}], "schritte": ["Schritt 1", "Schritt 2"], "hinweise": "Tipps oder leer", "ist_rezept": true}
+{"titel": "kurzer Rezeptname auf Deutsch", "portionen": "z. B. 2 Portionen oder leer", "zeit": "z. B. 30 Min oder leer", "zutaten": [{"menge": "200", "einheit": "g", "zutat": "Mehl"}, {"menge": "1", "einheit": "EL", "zutat": "Tomatenmark"}], "schritte": ["Schritt 1", "Schritt 2"], "hinweise": "Tipps oder leer", "ist_rezept": true}
 Regeln:
 - Schreibe alles auf Deutsch, auch Titel, Zutatennamen und Schritte. Übersetze aus jeder Sprache.
 - Nutze deutsche Einheiten: Grad Celsius statt Fahrenheit, g und ml statt cups, oz und lb, cm statt inch, EL und TL statt tbsp und tsp.
+- "menge" enthält NUR die Zahl, die Einheit steht ausschließlich in "einheit".
 - Erfinde nichts. Fehlt eine Menge, lass "menge" leer.
 - Ignoriere Hashtags, Werbung, Rabattcodes und Aufforderungen zum Folgen.
 - Enthält der Text kein Rezept, setze "ist_rezept": false und lass die Listen leer.
