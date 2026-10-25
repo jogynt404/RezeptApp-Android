@@ -38,6 +38,7 @@ data class Recipe(
     val data: RecipeData? = null,
     val error: String? = null,
     val created: Long = System.currentTimeMillis(),
+    val tags: List<String> = emptyList(),
 ) {
     fun sourceText(): String = listOf(
         if (description.isNotBlank()) "BESCHREIBUNG:\n$description" else "",
@@ -72,6 +73,7 @@ data class Recipe(
         .put("daten", data?.toJson() ?: JSONObject.NULL)
         .put("fehler", error ?: JSONObject.NULL)
         .put("erstellt", created)
+        .put("tags", JSONArray(tags))
 
     companion object {
         fun fromJson(o: JSONObject) = Recipe(
@@ -84,6 +86,7 @@ data class Recipe(
             data = o.optJSONObject("daten")?.let { RecipeParser.dataFromJson(it) },
             error = if (o.isNull("fehler")) null else o.optString("fehler"),
             created = o.optLong("erstellt", 0L),
+            tags = o.optJSONArray("tags")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() } } ?: emptyList(),
         )
     }
 }
@@ -98,8 +101,8 @@ object RecipeParser {
         """(zutaten|ingredients|zubereitung|instructions|anleitung|für \d+ (personen|portionen))""",
         RegexOption.IGNORE_CASE,
     )
-    private val urlRe = Regex("""https?://\S+""")
-    private val supportedHosts = listOf("instagram.com", "tiktok.com", "facebook.com", "fb.watch", "fb.com")
+    private val urlRe = Regex("""https?://[^\s<>"]+""")
+    private val socialHosts = listOf("instagram.com", "tiktok.com", "facebook.com", "fb.watch", "fb.com", "youtube.com", "youtu.be")
 
     fun looksLikeRecipe(text: String?): Boolean {
         if (text.isNullOrBlank()) return false
@@ -107,14 +110,17 @@ object RecipeParser {
         return units >= 3 || (keywordRe.containsMatchIn(text) && units >= 1)
     }
 
-    /** Sucht den ersten unterstuetzten Link in einem geteilten Text. */
+    /** Sucht im geteilten Text einen Link. Social-Media-Links haben Vorrang. */
     fun extractUrl(shared: String?): String? {
         if (shared.isNullOrBlank()) return null
-        return urlRe.findAll(shared).map { it.value.trimEnd('.', ',', ')', '"', '\'') }
-            .firstOrNull { u -> supportedHosts.any { u.contains(it, ignoreCase = true) } }
+        val all = urlRe.findAll(shared).map { it.value.trimEnd('.', ',', ')', '"', '\'') }.toList()
+        return all.firstOrNull { isSocial(it) } ?: all.firstOrNull()
     }
 
-    fun isSupported(url: String) = urlRe.matches(url.trim()) && supportedHosts.any { url.contains(it, true) }
+    /** Video-Plattform (yt-dlp) statt normaler Webseite. */
+    fun isSocial(url: String) = socialHosts.any { url.contains(it, ignoreCase = true) }
+
+    fun isSupported(url: String) = urlRe.matches(url.trim())
 
     /** Holt das JSON-Objekt aus einer KI-Antwort, auch wenn Text oder ```-Bloecke drumherum stehen. */
     fun parseLlm(text: String): RecipeData {

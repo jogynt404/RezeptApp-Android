@@ -14,6 +14,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import de.rezeptapp.ui.DetailScreen
+import de.rezeptapp.ui.EditScreen
+import de.rezeptapp.ui.ShoppingScreen
 import de.rezeptapp.ui.HomeScreen
 import de.rezeptapp.ui.LoginScreen
 import de.rezeptapp.ui.RezeptTheme
@@ -22,7 +24,9 @@ import de.rezeptapp.ui.SettingsScreen
 sealed interface Screen {
     data object Home : Screen
     data class Detail(val id: Long) : Screen
+    data class Edit(val id: Long) : Screen
     data object Settings : Screen
+    data object Shopping : Screen
     data object Login : Screen
 }
 
@@ -44,19 +48,27 @@ class MainActivity : ComponentActivity() {
         setContent {
             RezeptTheme {
                 BackHandler(enabled = screen != Screen.Home) {
-                    screen = if (screen == Screen.Login) Screen.Settings else Screen.Home
+                    screen = when (val cur = screen) {
+                        Screen.Login -> Screen.Settings
+                        is Screen.Edit -> Screen.Detail(cur.id)
+                        else -> Screen.Home
+                    }
                 }
                 when (val s = screen) {
                     Screen.Home -> HomeScreen(
                         onOpen = { screen = Screen.Detail(it) },
                         onSettings = { screen = Screen.Settings },
+                        onShopping = { screen = Screen.Shopping },
                         onImport = { url, audio -> startImport(url, audio) },
                     )
                     is Screen.Detail -> DetailScreen(
                         id = s.id,
                         onBack = { screen = Screen.Home },
                         onRedo = { ImportService.redo(this, s.id); screen = Screen.Home },
+                        onEdit = { screen = Screen.Edit(s.id) },
                     )
+                    is Screen.Edit -> EditScreen(id = s.id, onDone = { screen = Screen.Detail(s.id) })
+                    Screen.Shopping -> ShoppingScreen(onBack = { screen = Screen.Home })
                     Screen.Settings -> SettingsScreen(
                         onBack = { screen = Screen.Home },
                         onLogin = { screen = Screen.Login },
@@ -82,7 +94,7 @@ class MainActivity : ComponentActivity() {
         if (intent.action == Intent.ACTION_SEND) {
             val url = RecipeParser.extractUrl(intent.getStringExtra(Intent.EXTRA_TEXT))
             if (url == null) {
-                Toast.makeText(this, "Kein Link von Instagram, TikTok oder Facebook gefunden.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Im geteilten Text wurde kein Link gefunden.", Toast.LENGTH_LONG).show()
             } else {
                 startImport(url, false)
             }
@@ -91,7 +103,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startImport(url: String, forceAudio: Boolean) {
-        if (ModelManager.llmPath(this) == null) {
+        if (RecipeParser.isSocial(url) && ModelManager.llmPath(this) == null) {
             Toast.makeText(this, "Bitte zuerst die KI-Modelle herunterladen.", Toast.LENGTH_LONG).show()
             screen = Screen.Settings
             return

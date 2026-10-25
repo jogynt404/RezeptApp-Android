@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -61,7 +62,7 @@ fun RezeptTheme(content: @Composable () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Bar(title: String, onBack: (() -> Unit)? = null, actions: @Composable RowScope.() -> Unit = {}) {
+internal fun Bar(title: String, onBack: (() -> Unit)? = null, actions: @Composable RowScope.() -> Unit = {}) {
     TopAppBar(
         title = { Text(title, fontWeight = FontWeight.Bold) },
         navigationIcon = { if (onBack != null) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Zurück") } },
@@ -71,19 +72,29 @@ private fun Bar(title: String, onBack: (() -> Unit)? = null, actions: @Composabl
 
 // ---------------- Startseite ----------------
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun HomeScreen(onOpen: (Long) -> Unit, onSettings: () -> Unit, onImport: (String, Boolean) -> Unit) {
+fun HomeScreen(onOpen: (Long) -> Unit, onSettings: () -> Unit, onShopping: () -> Unit, onImport: (String, Boolean) -> Unit) {
     val ctx = LocalContext.current
     val recipes by RecipeStore.recipes.collectAsStateWithLifecycle()
     val job by ImportService.state.collectAsStateWithLifecycle()
+    val shopping by ShoppingStore.items.collectAsStateWithLifecycle()
     val clipboard = LocalClipboardManager.current
     var url by remember { mutableStateOf("") }
     var audio by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
+    var tagFilter by remember { mutableStateOf<String?>(null) }
     val modelsMissing = ModelManager.llmPath(ctx) == null
+    val allTags = remember(recipes) { recipes.flatMap { it.tags }.distinct().sortedBy { it.lowercase() } }
+    val openItems = shopping.count { !it.done }
 
     Scaffold(topBar = {
-        Bar("RezeptApp") { IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, "Einstellungen") } }
+        Bar("RezeptApp") {
+            IconButton(onClick = onShopping) {
+                BadgedBox(badge = { if (openItems > 0) Badge { Text("$openItems") } }) { Icon(Icons.Default.ShoppingCart, "Einkaufsliste") }
+            }
+            IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, "Einstellungen") }
+        }
     }) { pad ->
         LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (modelsMissing) item {
@@ -97,10 +108,10 @@ fun HomeScreen(onOpen: (Long) -> Unit, onSettings: () -> Unit, onImport: (String
             item {
                 Card {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Tipp: In Instagram, TikTok oder Facebook auf Teilen und dann auf RezeptApp tippen.", style = MaterialTheme.typography.bodySmall)
+                        Text("Tipp: In Instagram, TikTok, YouTube oder im Browser auf Teilen und dann auf RezeptApp tippen.", style = MaterialTheme.typography.bodySmall)
                         OutlinedTextField(
                             value = url, onValueChange = { url = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Link zum Post") },
+                            label = { Text("Link zum Post oder zur Webseite") },
                             trailingIcon = {
                                 IconButton(onClick = { clipboard.getText()?.text?.let { url = RecipeParser.extractUrl(it) ?: it } }) {
                                     Icon(Icons.Default.ContentPaste, "Einfügen")
@@ -117,7 +128,7 @@ fun HomeScreen(onOpen: (Long) -> Unit, onSettings: () -> Unit, onImport: (String
                             onClick = {
                                 val u = RecipeParser.extractUrl(url) ?: url.trim()
                                 if (RecipeParser.isSupported(u)) { onImport(u, audio); url = "" }
-                                else Toast.makeText(ctx, "Bitte einen Link von Instagram, TikTok oder Facebook einfügen.", Toast.LENGTH_LONG).show()
+                                else Toast.makeText(ctx, "Bitte einen gültigen Link einfügen (beginnt mit https://).", Toast.LENGTH_LONG).show()
                             },
                             enabled = url.isNotBlank(), modifier = Modifier.fillMaxWidth(),
                         ) { Text("Rezept auslesen") }
@@ -128,13 +139,24 @@ fun HomeScreen(onOpen: (Long) -> Unit, onSettings: () -> Unit, onImport: (String
             item {
                 OutlinedTextField(
                     value = query, onValueChange = { query = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                    leadingIcon = { Icon(Icons.Default.Search, null) }, placeholder = { Text("Rezepte durchsuchen ...") },
+                    leadingIcon = { Icon(Icons.Default.Search, null) }, placeholder = { Text("Rezepte oder Zutaten suchen ...") },
                 )
             }
+            if (allTags.isNotEmpty()) item {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = tagFilter == null, onClick = { tagFilter = null }, label = { Text("Alle") })
+                    allTags.forEach { t ->
+                        FilterChip(selected = tagFilter == t, onClick = { tagFilter = if (tagFilter == t) null else t }, label = { Text(t) })
+                    }
+                }
+            }
             val q = query.trim().lowercase()
-            val list = if (q.isEmpty()) recipes else recipes.filter { r ->
-                r.title.lowercase().contains(q) || r.author.lowercase().contains(q) ||
-                    r.data?.ingredients?.any { it.name.lowercase().contains(q) } == true
+            val tf = tagFilter
+            val list = recipes.filter { r ->
+                (tf == null || r.tags.contains(tf)) && (q.isEmpty() ||
+                    r.title.lowercase().contains(q) || r.author.lowercase().contains(q) ||
+                    r.tags.any { it.lowercase().contains(q) } ||
+                    r.data?.ingredients?.any { it.name.lowercase().contains(q) } == true)
             }
             if (list.isEmpty()) item {
                 Text(if (recipes.isEmpty()) "Noch keine Rezepte" else "Nichts gefunden", color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(24.dp))
@@ -146,6 +168,7 @@ fun HomeScreen(onOpen: (Long) -> Unit, onSettings: () -> Unit, onImport: (String
                         val date = SimpleDateFormat("dd.MM.yyyy", Locale.GERMANY).format(Date(r.created))
                         Text(listOf(r.author, date, if (r.error != null) "⚠ nicht sortiert" else "").filter { it.isNotEmpty() }.joinToString(" · "),
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                        if (r.tags.isNotEmpty()) Text(r.tags.joinToString("  ") { "#$it" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                     }
                 }
             }
@@ -186,19 +209,30 @@ private fun JobCard(job: JobState, onOpen: (Long) -> Unit) {
 // ---------------- Rezept ----------------
 
 @Composable
-fun DetailScreen(id: Long, onBack: () -> Unit, onRedo: () -> Unit) {
+fun DetailScreen(id: Long, onBack: () -> Unit, onRedo: () -> Unit, onEdit: () -> Unit) {
     val ctx = LocalContext.current
     val recipes by RecipeStore.recipes.collectAsStateWithLifecycle()
     val r = recipes.firstOrNull { it.id == id }
     var confirmDelete by remember { mutableStateOf(false) }
     var showRaw by remember { mutableStateOf(false) }
+    var showShopping by remember { mutableStateOf(false) }
+    val base = r?.data?.servings?.let { Scaler.baseServings(it) }
+    // Bei bekannter Portionszahl wird in Portionen gezaehlt, sonst als Faktor
+    var portions by remember(id, base) { mutableIntStateOf(base ?: 1) }
+    var factorSteps by remember(id) { mutableIntStateOf(4) } // 4/4 = x1
+    val factor = if (base != null) portions.toDouble() / base else factorSteps / 4.0
+    val scaled = remember(r, factor) { r?.data?.ingredients?.let { Scaler.scale(it, factor) } ?: emptyList() }
 
     Scaffold(topBar = {
         Bar("Rezept", onBack) {
             if (r != null) {
+                IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, "Bearbeiten") }
                 IconButton(onClick = {
+                    val text = if (factor == 1.0) r.toMarkdown() else r.copy(data = r.data?.let { dd ->
+                        dd.copy(ingredients = scaled, servings = if (base != null) "$portions Portionen" else dd.servings)
+                    }).toMarkdown()
                     ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"; putExtra(Intent.EXTRA_SUBJECT, r.title); putExtra(Intent.EXTRA_TEXT, r.toMarkdown())
+                        type = "text/plain"; putExtra(Intent.EXTRA_SUBJECT, r.title); putExtra(Intent.EXTRA_TEXT, text)
                     }, "Rezept teilen"))
                 }) { Icon(Icons.Default.Share, "Teilen") }
                 IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Default.Delete, "Löschen") }
@@ -209,22 +243,38 @@ fun DetailScreen(id: Long, onBack: () -> Unit, onRedo: () -> Unit) {
         val d = r.data
         Column(Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(r.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            val meta = listOfNotNull(d?.servings?.takeIf { it.isNotBlank() }, d?.time?.takeIf { it.isNotBlank() }, r.author.takeIf { it.isNotBlank() }?.let { "von $it" })
+            val meta = listOfNotNull(d?.time?.takeIf { it.isNotBlank() }, r.author.takeIf { it.isNotBlank() }?.let { "von $it" })
             if (meta.isNotEmpty()) Text(meta.joinToString(" · "), color = MaterialTheme.colorScheme.outline)
+            if (r.tags.isNotEmpty()) Text(r.tags.joinToString("  ") { "#$it" }, color = MaterialTheme.colorScheme.primary)
             TextButton(onClick = { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(r.url))) }, contentPadding = PaddingValues(0.dp)) {
                 Icon(Icons.Default.OpenInNew, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Original öffnen")
             }
             r.error?.let { Note(it, error = true) }
-            if (d?.isRecipe == false) Note("Die KI hat in diesem Post kein Rezept gefunden. Probiere \"Video immer anhören\".")
+            if (d?.isRecipe == false) Note("Die KI hat hier kein Rezept gefunden. Probiere \"Video immer anhören\" oder trage es über den Stift selbst ein.")
 
             SectionTitle("Zutaten")
+            if (d != null && d.ingredients.isNotEmpty()) {
+                Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(12.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { if (base != null) { if (portions > 1) portions-- } else if (factorSteps > 1) factorSteps-- }) { Icon(Icons.Default.Remove, "Weniger") }
+                        Text(
+                            if (base != null) "$portions ${if (portions == 1) "Portion" else "Portionen"}" else "Menge ×${Scaler.format(factor)}",
+                            fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), textAlign = TextAlign.Center,
+                        )
+                        IconButton(onClick = { if (base != null) { if (portions < 99) portions++ } else if (factorSteps < 40) factorSteps++ }) { Icon(Icons.Default.Add, "Mehr") }
+                    }
+                }
+            }
             if (d == null || d.ingredients.isEmpty()) Text("keine erkannt", color = MaterialTheme.colorScheme.outline)
-            d?.ingredients?.forEach { ing ->
+            scaled.forEach { ing ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                     Text(listOf(ing.amount, ing.unit).filter { it.isNotBlank() }.joinToString(" "), fontWeight = FontWeight.Bold, modifier = Modifier.width(90.dp))
                     Text(ing.name)
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+            }
+            if (scaled.isNotEmpty()) FilledTonalButton(onClick = { showShopping = true }) {
+                Icon(Icons.Default.AddShoppingCart, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Auf die Einkaufsliste")
             }
 
             SectionTitle("Zubereitung")
@@ -238,7 +288,7 @@ fun DetailScreen(id: Long, onBack: () -> Unit, onRedo: () -> Unit) {
             if (!d?.notes.isNullOrBlank()) Note("Hinweise: ${d!!.notes}")
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = onRedo) { Text("Neu auswerten") }
+                FilledTonalButton(onClick = onRedo, enabled = r.sourceText().isNotBlank()) { Text("Neu auswerten") }
                 FilledTonalButton(onClick = { showRaw = !showRaw }) { Text(if (showRaw) "Originaltext ausblenden" else "Originaltext") }
             }
             if (showRaw) {
@@ -255,13 +305,43 @@ fun DetailScreen(id: Long, onBack: () -> Unit, onRedo: () -> Unit) {
         confirmButton = { TextButton(onClick = { RecipeStore.delete(r.id); confirmDelete = false; onBack() }) { Text("Löschen") } },
         dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Abbrechen") } },
     )
+    if (showShopping && r != null) AddToShoppingDialog(r.title, scaled) { showShopping = false }
 }
 
 @Composable
-private fun SectionTitle(t: String) = Text(t.uppercase(), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp))
+private fun AddToShoppingDialog(title: String, ingredients: List<Ingredient>, onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    val checked = remember { mutableStateListOf(*Array(ingredients.size) { true }) }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Auf die Einkaufsliste") },
+        text = {
+            LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                items(ingredients.size) { i ->
+                    Row(Modifier.fillMaxWidth().clickable { checked[i] = !checked[i] }, verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = checked[i], onCheckedChange = { checked[i] = it })
+                        Text(ingredients[i].line())
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val picked = ingredients.filterIndexed { i, _ -> checked[i] }.map { it.line() }
+                ShoppingStore.add(picked, title)
+                Toast.makeText(ctx, "${picked.size} Zutaten hinzugefügt", Toast.LENGTH_SHORT).show()
+                onClose()
+            }) { Text("Hinzufügen") }
+        },
+        dismissButton = { TextButton(onClick = onClose) { Text("Abbrechen") } },
+    )
+}
 
 @Composable
-private fun Note(t: String, error: Boolean = false) = Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(10.dp)) {
+internal fun SectionTitle(t: String) = Text(t.uppercase(), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp))
+
+@Composable
+internal fun Note(t: String, error: Boolean = false) = Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(10.dp)) {
     Text(t, Modifier.padding(12.dp).fillMaxWidth(), color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
 }
 
@@ -286,6 +366,19 @@ fun SettingsScreen(onBack: () -> Unit, onLogin: () -> Unit) {
             val ok = withContext(Dispatchers.IO) { runCatching { ModelManager.importCustomLlm(ctx, uri) }.isSuccess }
             importing = false
             Toast.makeText(ctx, if (ok) "Eigenes Modell übernommen" else "Datei konnte nicht kopiert werden", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) scope.launch {
+            val res = withContext(Dispatchers.IO) { runCatching { Backup.export(ctx, uri) } }
+            Toast.makeText(ctx, res.fold({ "$it Rezepte gesichert" }, { "Sicherung fehlgeschlagen: ${it.message}" }), Toast.LENGTH_LONG).show()
+        }
+    }
+    val restorer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            val res = withContext(Dispatchers.IO) { runCatching { Backup.import(ctx, uri) } }
+            Toast.makeText(ctx, res.fold({ "$it Rezepte wiederhergestellt" }, { "Einlesen fehlgeschlagen: ${it.message}" }), Toast.LENGTH_LONG).show()
         }
     }
 
@@ -324,6 +417,16 @@ fun SettingsScreen(onBack: () -> Unit, onLogin: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = onLogin) { Text(if (loggedIn) "Erneut anmelden" else "Bei Instagram anmelden") }
                 if (loggedIn) OutlinedButton(onClick = { CookieExport.clear(ctx); tick++ }) { Text("Abmelden") }
+            }
+
+            SectionTitle("Sicherung")
+            Text("Alle Rezepte und die Einkaufsliste in eine Datei sichern, z. B. in Google Drive oder auf den PC. Beim Einlesen werden gleiche Rezepte ersetzt.", style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = {
+                    val date = SimpleDateFormat("yyyy-MM-dd", Locale.GERMANY).format(Date())
+                    exporter.launch("RezeptApp-Sicherung-$date.json")
+                }) { Text("Sichern") }
+                OutlinedButton(onClick = { restorer.launch(arrayOf("application/json", "application/octet-stream", "text/plain", "*/*")) }) { Text("Einlesen") }
             }
 
             SectionTitle("Eigenes Modell (für Profis)")

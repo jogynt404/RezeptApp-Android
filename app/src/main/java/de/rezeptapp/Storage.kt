@@ -249,3 +249,105 @@ object CookieExport {
         CookieManager.getInstance().removeAllCookies(null)
     }
 }
+
+data class ShoppingItem(
+    val id: Long,
+    val text: String,
+    val recipe: String = "",
+    val done: Boolean = false,
+    val category: String = ShoppingCategories.categorize(text),
+) {
+    fun toJson(): JSONObject = JSONObject().put("id", id).put("text", text).put("rezept", recipe).put("erledigt", done).put("kategorie", category)
+
+    companion object {
+        fun fromJson(o: JSONObject) = ShoppingItem(
+            id = o.getLong("id"),
+            text = o.optString("text"),
+            recipe = o.optString("rezept"),
+            done = o.optBoolean("erledigt"),
+            category = o.optString("kategorie").ifBlank { ShoppingCategories.categorize(o.optString("text")) },
+        )
+    }
+}
+
+/** Einkaufsliste als JSON-Datei. */
+object ShoppingStore {
+    private lateinit var file: File
+    private val _items = MutableStateFlow<List<ShoppingItem>>(emptyList())
+    val items: StateFlow<List<ShoppingItem>> = _items
+    private var nextId = System.currentTimeMillis()
+
+    fun init(ctx: Context) {
+        file = File(ctx.filesDir, "einkaufsliste.json")
+        _items.value = runCatching {
+            val arr = org.json.JSONArray(file.readText())
+            (0 until arr.length()).map { ShoppingItem.fromJson(arr.getJSONObject(it)) }
+        }.getOrDefault(emptyList())
+    }
+
+    @Synchronized
+    private fun write(list: List<ShoppingItem>) {
+        _items.value = list
+        file.writeText(org.json.JSONArray(list.map { it.toJson() }).toString(2))
+    }
+
+    @Synchronized
+    fun add(texts: List<String>, recipe: String = "") {
+        val existing = _items.value
+        val fresh = texts.map { it.trim() }.filter { it.isNotEmpty() }
+            .filter { t -> existing.none { !it.done && it.text.equals(t, ignoreCase = true) } }
+            .map { ShoppingItem(nextId++, it, recipe) }
+        write(existing + fresh)
+    }
+
+    fun toggle(id: Long) = write(_items.value.map { if (it.id == id) it.copy(done = !it.done) else it })
+
+    fun remove(id: Long) = write(_items.value.filterNot { it.id == id })
+
+    fun clearDone() = write(_items.value.filterNot { it.done })
+
+    fun clearAll() = write(emptyList())
+
+    fun replaceAll(list: List<ShoppingItem>) = write(list)
+
+    fun asText(): String = _items.value.filterNot { it.done }
+        .groupBy { it.category }
+        .toSortedMap(compareBy<String> { ShoppingCategories.ORDER.indexOf(it).let { i -> if (i < 0) 99 else i } })
+        .entries.joinToString("\n\n") { (cat, list) -> "$cat\n" + list.joinToString("\n") { "☐ ${it.text}" } }
+}
+
+/** Sicherung aller Rezepte und der Einkaufsliste in einer Datei. */
+object Backup {
+    fun export(ctx: Context, uri: Uri): Int {
+        val recipes = RecipeStore.recipes.value
+        val root = JSONObject()
+            .put("app", "RezeptApp")
+            .put("format", 1)
+            .put("exportiert", System.currentTimeMillis())
+            .put("rezepte", org.json.JSONArray(recipes.map { it.toJson() }))
+            .put("einkaufsliste", org.json.JSONArray(ShoppingStore.items.value.map { it.toJson() }))
+        ctx.contentResolver.openOutputStream(uri, "wt")!!.use { it.write(root.toString(2).toByteArray(Charsets.UTF_8)) }
+        return recipes.size
+    }
+
+    /** Liest eine Sicherung ein. Gleiche Rezepte (gleiche ID oder gleicher Link) werden ersetzt. */
+    fun import(ctx: Context, uri: Uri): Int {
+        val text = ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) }
+        val root = JSONObject(text)
+        require(root.optString("app") == "RezeptApp") { "Das ist keine Sicherung der RezeptApp." }
+        val arr = root.getJSONArray("rezepte")
+        var count = 0
+        for (i in 0 until arr.length()) {
+            val r = runCatching { Recipe.fromJson(arr.getJSONObject(i)) }.getOrNull() ?: continue
+            RecipeStore.findByUrl(r.url)?.takeIf { it.id != r.id && r.url.isNotBlank() }?.let { RecipeStore.delete(it.id) }
+            RecipeStore.save(r)
+            count++
+        }
+        root.optJSONArray("einkaufsliste")?.let { a ->
+            if (ShoppingStore.items.value.isEmpty() && a.length() > 0) {
+                ShoppingStore.replaceAll((0 until a.length()).map { ShoppingItem.fromJson(a.getJSONObject(it)) })
+            }
+        }
+        return count
+    }
+}

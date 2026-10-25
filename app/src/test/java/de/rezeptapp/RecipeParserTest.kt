@@ -19,7 +19,10 @@ class RecipeParserTest {
             RecipeParser.extractUrl("Schau dir diesen Beitrag an: https://www.instagram.com/reel/ABC123/?igsh=xyz"),
         )
         assertEquals("https://vm.tiktok.com/ZMabc/", RecipeParser.extractUrl("https://vm.tiktok.com/ZMabc/"))
-        assertNull(RecipeParser.extractUrl("https://example.com/x"))
+        assertEquals("https://www.chefkoch.de/rezepte/123/x.html", RecipeParser.extractUrl("Lecker! https://www.chefkoch.de/rezepte/123/x.html"))
+        assertNull(RecipeParser.extractUrl("kein Link hier"))
+        assertTrue(RecipeParser.isSocial("https://youtu.be/abc"))
+        assertFalse(RecipeParser.isSocial("https://www.chefkoch.de/rezepte/1"))
     }
 
     @Test fun liestKiAntwortMitRauschen() {
@@ -40,7 +43,7 @@ class RecipeParserTest {
     }
 
     @Test fun rundreiseJson() {
-        val r = Recipe(id = 1, url = "https://www.tiktok.com/@a/video/1", title = "Dal",
+        val r = Recipe(id = 1, url = "https://www.tiktok.com/@a/video/1", title = "Dal", tags = listOf("Schnell", "Vegan"),
             data = RecipeData(title = "Dal", ingredients = listOf(Ingredient("1", "Tasse", "Linsen")), steps = listOf("Kochen")))
         val back = Recipe.fromJson(r.toJson())
         assertEquals(r.copy(created = back.created), back)

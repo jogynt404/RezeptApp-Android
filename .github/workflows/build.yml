@@ -59,7 +59,7 @@ jobs:
         if: failure()
         run: |
           # Kompilier- und Gradle-Fehler sichtbar machen (je Anmerkung max. ~60 Zeilen)
-          grep -E "^e: |error:|What went wrong|Could not |FAILED|Exception|Caused by|> " build.log \
+          grep -E "^e: |error:|What went wrong|Could not |FAILED|Exception|AssertionError|expected:|Caused by|> " build.log \
             | grep -v "^\s*at " | head -300 > errors.txt || true
           [ -s errors.txt ] || tail -120 build.log > errors.txt
           split -l 60 errors.txt part_

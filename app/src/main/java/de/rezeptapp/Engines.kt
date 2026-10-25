@@ -107,6 +107,54 @@ object PostFetcher {
     }
 }
 
+/** Normale Rezept-Webseiten (Chefkoch, Blogs ...) laden. */
+object WebFetcher {
+    data class Page(val url: String, val html: String)
+
+    fun fetch(url: String): Page {
+        var current = url
+        repeat(5) {
+            val conn = (java.net.URL(current).openConnection() as java.net.HttpURLConnection).apply {
+                instanceFollowRedirects = false
+                connectTimeout = 15000
+                readTimeout = 20000
+                setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36")
+                setRequestProperty("Accept", "text/html,application/xhtml+xml")
+                setRequestProperty("Accept-Language", "de-DE,de;q=0.9,en;q=0.6")
+            }
+            try {
+                val code = conn.responseCode
+                if (code in 300..399) {
+                    val loc = conn.getHeaderField("Location") ?: throw UserFacingException("Weiterleitung ohne Ziel.")
+                    current = java.net.URL(java.net.URL(current), loc).toString()
+                    return@repeat
+                }
+                if (code >= 400) throw UserFacingException("Die Webseite antwortet mit Fehler $code.")
+                val csName = Regex("charset=([\\w-]+)", RegexOption.IGNORE_CASE).find(conn.contentType ?: "")?.groupValues?.get(1)
+                val bytes = conn.inputStream.use { input ->
+                    val out = java.io.ByteArrayOutputStream()
+                    val buf = ByteArray(64 * 1024)
+                    while (out.size() < 4_000_000) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                    }
+                    out.toByteArray()
+                }
+                val cs = runCatching { charset(csName ?: "UTF-8") }.getOrDefault(Charsets.UTF_8)
+                return Page(current, String(bytes, cs))
+            } catch (e: UserFacingException) {
+                throw e
+            } catch (e: Exception) {
+                throw UserFacingException("Webseite konnte nicht geladen werden: ${e.message}", e)
+            } finally {
+                conn.disconnect()
+            }
+        }
+        throw UserFacingException("Zu viele Weiterleitungen.")
+    }
+}
+
 /** Liest eine 16-Bit-PCM-WAV-Datei als Float-Samples. */
 object WavReader {
     fun read(file: File): Pair<FloatArray, Int> {

@@ -10,6 +10,15 @@ Liest Rezepte aus Instagram-, TikTok- und Facebook-Posts aus. Die KI läuft **ko
 4. **Sortieren:** Die Sprach-KI Qwen 2.5 macht daraus Zutaten und Schritte (offline).
 5. **Speichern:** Rezepte bleiben auf dem Handy, sind durchsuchbar und lassen sich als Text teilen.
 
+## Weitere Funktionen
+
+- **YouTube und Rezept-Webseiten:** Webseiten mit eingebetteten Rezeptdaten (z. B. Chefkoch) werden ohne KI und damit fehlerfrei übernommen.
+- **Bearbeiten:** Titel, Zutaten, Schritte, Hinweise und Kategorien korrigieren.
+- **Portionen umrechnen:** Mit Plus und Minus passen sich alle Mengen an.
+- **Einkaufsliste:** Zutaten aus Rezepten übernehmen, nach Supermarkt-Abteilung sortiert, abhaken und teilen.
+- **Kategorien:** Rezepte mit Schlagwörtern versehen und danach filtern.
+- **Sicherung:** Alle Rezepte und die Einkaufsliste als Datei sichern und wieder einlesen.
+
 Internet braucht die App nur zum Abrufen des Posts und einmalig zum Laden der Modelle.
 
 ## Installation

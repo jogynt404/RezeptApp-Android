@@ -29,6 +29,7 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         RecipeStore.init(this)
+        ShoppingStore.init(this)
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(ImportService.CHANNEL, "Rezepte auslesen", NotificationManager.IMPORTANCE_LOW))
         nm.createNotificationChannel(NotificationChannel(ImportService.CHANNEL_DONE, "Rezept fertig", NotificationManager.IMPORTANCE_DEFAULT))
@@ -132,7 +133,36 @@ class ImportService : Service() {
         }
     }
 
-    private fun import(url: String, forceAudio: Boolean): Long {
+    private fun import(url: String, forceAudio: Boolean): Long =
+        if (RecipeParser.isSocial(url)) importSocial(url, forceAudio) else importWeb(url)
+
+    /** Webseite: zuerst eingebettete Rezeptdaten (ohne KI), sonst Seitentext an die KI. */
+    private fun importWeb(url: String): Long {
+        update("Webseite wird geladen ...")
+        val page = WebFetcher.fetch(url)
+        val text = WebRecipeParser.visibleText(page.html).take(12000)
+        val existing = RecipeStore.findByUrl(page.url)
+        val parsed = WebRecipeParser.parse(page.html)
+        if (parsed != null && parsed.data.isRecipe) {
+            val r = Recipe(
+                id = existing?.id ?: System.currentTimeMillis(), url = page.url,
+                title = parsed.data.title.ifBlank { WebRecipeParser.title(page.html).ifBlank { "Rezept" } },
+                author = parsed.author, description = text, data = parsed.data,
+                tags = existing?.tags ?: emptyList(), created = existing?.created ?: System.currentTimeMillis(),
+            )
+            RecipeStore.save(r)
+            return r.id
+        }
+        if (text.isBlank()) throw UserFacingException("Auf der Webseite wurde kein Text gefunden.")
+        val base = Recipe(
+            id = existing?.id ?: System.currentTimeMillis(), url = page.url,
+            title = WebRecipeParser.title(page.html).ifBlank { "Rezept" }, description = text,
+            tags = existing?.tags ?: emptyList(), created = existing?.created ?: System.currentTimeMillis(),
+        )
+        return structureAndSave(base)
+    }
+
+    private fun importSocial(url: String, forceAudio: Boolean): Long {
         update("Post wird geladen ...")
         PostFetcher.ensureInit(this)
         PostFetcher.maybeUpdate(this)
@@ -151,10 +181,12 @@ class ImportService : Service() {
             }
         }
 
+        val existing = RecipeStore.findByUrl(post.url)
         val base = Recipe(
-            id = RecipeStore.findByUrl(post.url)?.id ?: System.currentTimeMillis(),
+            id = existing?.id ?: System.currentTimeMillis(),
             url = post.url, title = post.title.ifBlank { "Rezept" }, author = post.author,
             description = post.description, transcript = transcript,
+            tags = existing?.tags ?: emptyList(), created = existing?.created ?: System.currentTimeMillis(),
         )
         if (base.sourceText().isBlank()) throw UserFacingException("Der Post enthält weder Text noch Ton.")
         return structureAndSave(base)
