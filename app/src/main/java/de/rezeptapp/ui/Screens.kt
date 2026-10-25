@@ -7,8 +7,10 @@ import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -73,10 +75,11 @@ internal fun Bar(title: String, onBack: (() -> Unit)? = null, actions: @Composab
 
 // ---------------- Startseite ----------------
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(onOpen: (Long) -> Unit, onSettings: () -> Unit, onImport: (String, Boolean) -> Unit) {
     val ctx = LocalContext.current
+    val settings = remember { Settings(ctx) }
     val recipes by RecipeStore.recipes.collectAsStateWithLifecycle()
     val job by ImportService.state.collectAsStateWithLifecycle()
     val clipboard = LocalClipboardManager.current
@@ -84,89 +87,164 @@ fun HomeScreen(onOpen: (Long) -> Unit, onSettings: () -> Unit, onImport: (String
     var audio by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var tagFilter by remember { mutableStateOf<String?>(null) }
+    var grouped by remember { mutableStateOf(settings.groupedView) }
+    val collapsed = remember { mutableStateListOf<String>() }
+    val selected = remember { mutableStateListOf<Long>() }
+    var showBulk by remember { mutableStateOf(false) }
+    var manageTag by remember { mutableStateOf<String?>(null) }
     val modelsMissing = ModelManager.llmPath(ctx) == null
-    val allTags = remember(recipes) { recipes.flatMap { it.tags }.distinct().sortedBy { it.lowercase() } }
+    val allTags = remember(recipes) { recipes.flatMap { it.tags }.distinctBy { it.lowercase() }.sortedBy { it.lowercase() } }
+    val selecting = selected.isNotEmpty()
+
+    BackHandler(enabled = selecting) { selected.clear() }
+
+    val q = query.trim().lowercase()
+    val tf = tagFilter
+    val list = recipes.filter { r ->
+        (grouped || tf == null || r.tags.any { it.equals(tf, true) }) && (q.isEmpty() ||
+            r.title.lowercase().contains(q) || r.author.lowercase().contains(q) ||
+            r.tags.any { it.lowercase().contains(q) } ||
+            r.data?.ingredients?.any { it.name.lowercase().contains(q) } == true)
+    }
 
     Scaffold(topBar = {
-        Bar("RezeptApp") {
-            IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, "Einstellungen") }
+        if (selecting) {
+            Bar("${selected.size} ausgewählt", onBack = { selected.clear() }) {
+                TextButton(onClick = { selected.clear(); selected.addAll(list.map { it.id }) }) { Text("Alle") }
+                IconButton(onClick = { showBulk = true }) { Icon(Icons.Default.Label, "Kategorien zuordnen") }
+            }
+        } else {
+            Bar("RezeptApp") {
+                IconButton(onClick = { grouped = !grouped; settings.groupedView = grouped }) {
+                    Icon(if (grouped) Icons.Default.ViewList else Icons.Default.FolderOpen, if (grouped) "Als Liste" else "Nach Kategorien")
+                }
+                IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, "Einstellungen") }
+            }
         }
     }) { pad ->
         LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (modelsMissing) item {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer), modifier = Modifier.clickable { onSettings() }) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Erster Schritt: KI-Modelle laden", fontWeight = FontWeight.Bold)
-                        Text("Einmalig ca. 2 GB im WLAN. Danach läuft die KI offline. Hier tippen.")
-                    }
-                }
-            }
-            item {
-                Card {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Tipp: In Instagram, TikTok, YouTube oder im Browser auf Teilen und dann auf RezeptApp tippen.", style = MaterialTheme.typography.bodySmall)
-                        OutlinedTextField(
-                            value = url, onValueChange = { url = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Link zum Post oder zur Webseite") },
-                            trailingIcon = {
-                                IconButton(onClick = { clipboard.getText()?.text?.let { url = RecipeParser.extractUrl(it) ?: it } }) {
-                                    Icon(Icons.Default.ContentPaste, "Einfügen")
-                                }
-                            },
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                            keyboardActions = KeyboardActions(onGo = { if (url.isNotBlank()) onImport(url.trim(), audio) }),
-                        )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(checked = audio, onCheckedChange = { audio = it })
-                            Text("Video immer anhören")
+            if (!selecting) {
+                if (modelsMissing) item {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer), modifier = Modifier.clickable { onSettings() }) {
+                        Column(Modifier.padding(16.dp)) {
+                            Text("Erster Schritt: KI-Modelle laden", fontWeight = FontWeight.Bold)
+                            Text("Einmalig ca. 2 GB im WLAN. Danach läuft die KI offline. Hier tippen.")
                         }
-                        Button(
-                            onClick = {
-                                val u = RecipeParser.extractUrl(url) ?: url.trim()
-                                if (RecipeParser.isSupported(u)) { onImport(u, audio); url = "" }
-                                else Toast.makeText(ctx, "Bitte einen gültigen Link einfügen (beginnt mit https://).", Toast.LENGTH_LONG).show()
-                            },
-                            enabled = url.isNotBlank(), modifier = Modifier.fillMaxWidth(),
-                        ) { Text("Rezept auslesen") }
                     }
                 }
-            }
-            if (job.running || job.error != null || job.doneRecipeId != null) item { JobCard(job, onOpen) }
-            item {
-                OutlinedTextField(
-                    value = query, onValueChange = { query = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                    leadingIcon = { Icon(Icons.Default.Search, null) }, placeholder = { Text("Rezepte oder Zutaten suchen ...") },
-                )
-            }
-            if (allTags.isNotEmpty()) item {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = tagFilter == null, onClick = { tagFilter = null }, label = { Text("Alle") })
-                    allTags.forEach { t ->
-                        FilterChip(selected = tagFilter == t, onClick = { tagFilter = if (tagFilter == t) null else t }, label = { Text(t) })
+                item {
+                    Card {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Tipp: In Instagram, TikTok, YouTube oder im Browser auf Teilen und dann auf RezeptApp tippen.", style = MaterialTheme.typography.bodySmall)
+                            OutlinedTextField(
+                                value = url, onValueChange = { url = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                                label = { Text("Link zum Post oder zur Webseite") },
+                                trailingIcon = {
+                                    IconButton(onClick = { clipboard.getText()?.text?.let { url = RecipeParser.extractUrl(it) ?: it } }) {
+                                        Icon(Icons.Default.ContentPaste, "Einfügen")
+                                    }
+                                },
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                                keyboardActions = KeyboardActions(onGo = { if (url.isNotBlank()) onImport(url.trim(), audio) }),
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = audio, onCheckedChange = { audio = it })
+                                Text("Video immer anhören")
+                            }
+                            Button(
+                                onClick = {
+                                    val u = RecipeParser.extractUrl(url) ?: url.trim()
+                                    if (RecipeParser.isSupported(u)) { onImport(u, audio); url = "" }
+                                    else Toast.makeText(ctx, "Bitte einen gültigen Link einfügen (beginnt mit https://).", Toast.LENGTH_LONG).show()
+                                },
+                                enabled = url.isNotBlank(), modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Rezept auslesen") }
+                        }
                     }
                 }
-            }
-            val q = query.trim().lowercase()
-            val tf = tagFilter
-            val list = recipes.filter { r ->
-                (tf == null || r.tags.contains(tf)) && (q.isEmpty() ||
-                    r.title.lowercase().contains(q) || r.author.lowercase().contains(q) ||
-                    r.tags.any { it.lowercase().contains(q) } ||
-                    r.data?.ingredients?.any { it.name.lowercase().contains(q) } == true)
+                if (job.running || job.error != null || job.doneRecipeId != null) item { JobCard(job, onOpen) }
+                item {
+                    OutlinedTextField(
+                        value = query, onValueChange = { query = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                        leadingIcon = { Icon(Icons.Default.Search, null) }, placeholder = { Text("Rezepte oder Zutaten suchen ...") },
+                    )
+                }
+                if (!grouped && allTags.isNotEmpty()) item {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = tagFilter == null, onClick = { tagFilter = null }, label = { Text("Alle") })
+                        allTags.forEach { t ->
+                            FilterChip(selected = tagFilter == t, onClick = { tagFilter = if (tagFilter == t) null else t }, label = { Text(t) })
+                        }
+                    }
+                }
+                if (recipes.isNotEmpty()) item {
+                    Text("Tipp: Rezept lange drücken, um mehrere auf einmal einzusortieren.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                }
             }
             if (list.isEmpty()) item {
                 Text(if (recipes.isEmpty()) "Noch keine Rezepte" else "Nichts gefunden", color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(24.dp))
             }
-            items(list, key = { it.id }) { r ->
-                Card(Modifier.fillMaxWidth().clickable { onOpen(r.id) }) {
-                    Column(Modifier.padding(14.dp)) {
-                        Text(r.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        val date = SimpleDateFormat("dd.MM.yyyy", Locale.GERMANY).format(Date(r.created))
-                        Text(listOf(r.author, date, if (r.error != null) "⚠ nicht sortiert" else "").filter { it.isNotEmpty() }.joinToString(" · "),
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
-                        if (r.tags.isNotEmpty()) Text(r.tags.joinToString("  ") { "#$it" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+
+            val card: @Composable (Recipe) -> Unit = { r ->
+                RecipeCard(r, selected = r.id in selected, selecting = selecting,
+                    onClick = { if (selecting) { if (r.id in selected) selected.remove(r.id) else selected.add(r.id) } else onOpen(r.id) },
+                    onLongClick = { if (r.id in selected) selected.remove(r.id) else selected.add(r.id) })
+            }
+
+            if (!grouped) {
+                items(list, key = { it.id }) { r -> card(r) }
+            } else {
+                Categories.group(list).forEach { (cat, rs) ->
+                    val isCollapsed = cat in collapsed
+                    item(key = "h-$cat") {
+                        Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(10.dp)) {
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .combinedClickable(
+                                        onClick = { if (isCollapsed) collapsed.remove(cat) else collapsed.add(cat) },
+                                        onLongClick = { if (cat != Categories.NONE) manageTag = cat },
+                                    )
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(if (cat == Categories.NONE) Icons.Default.FolderOff else Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(10.dp))
+                                Text(cat, Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                                Text("${rs.size}", color = MaterialTheme.colorScheme.outline)
+                                if (cat != Categories.NONE) IconButton(onClick = { manageTag = cat }, Modifier.size(32.dp)) {
+                                    Icon(Icons.Default.MoreVert, "Kategorie verwalten", Modifier.size(18.dp))
+                                }
+                                Icon(if (isCollapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess, if (isCollapsed) "Aufklappen" else "Zuklappen")
+                            }
+                        }
                     }
+                    if (!isCollapsed) items(rs, key = { "$cat-${it.id}" }) { r -> card(r) }
                 }
+            }
+        }
+    }
+    if (showBulk) BulkCategoryDialog(selected.toList(), onDone = { showBulk = false; selected.clear() }, onClose = { showBulk = false })
+    manageTag?.let { t -> ManageCategoryDialog(t) { manageTag = null } }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun RecipeCard(r: Recipe, selected: Boolean, selecting: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+    Card(
+        Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        colors = if (selected) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer) else CardDefaults.cardColors(),
+    ) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (selecting) {
+                Checkbox(checked = selected, onCheckedChange = { onClick() })
+                Spacer(Modifier.width(6.dp))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(r.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                val date = SimpleDateFormat("dd.MM.yyyy", Locale.GERMANY).format(Date(r.created))
+                Text(listOf(r.author, date, if (r.error != null) "⚠ nicht sortiert" else "").filter { it.isNotEmpty() }.joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                if (r.tags.isNotEmpty()) Text(r.tags.joinToString("  ") { "#$it" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
             }
         }
     }
@@ -214,6 +292,7 @@ fun DetailScreen(id: Long, onBack: () -> Unit, onRedo: () -> Unit, onEdit: () ->
     var showShopping by remember { mutableStateOf(false) }
     var showPlan by remember { mutableStateOf(false) }
     var shareText by remember { mutableStateOf<String?>(null) }
+    var showCategories by remember { mutableStateOf(false) }
     val base = r?.data?.servings?.let { Scaler.baseServings(it) }
     // Bei bekannter Portionszahl wird in Portionen gezaehlt, sonst als Faktor
     var portions by remember(id, base) { mutableIntStateOf(base ?: 1) }
@@ -240,7 +319,11 @@ fun DetailScreen(id: Long, onBack: () -> Unit, onRedo: () -> Unit, onEdit: () ->
             Text(r.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             val meta = listOfNotNull(d?.time?.takeIf { it.isNotBlank() }, r.author.takeIf { it.isNotBlank() }?.let { "von $it" })
             if (meta.isNotEmpty()) Text(meta.joinToString(" · "), color = MaterialTheme.colorScheme.outline)
-            if (r.tags.isNotEmpty()) Text(r.tags.joinToString("  ") { "#$it" }, color = MaterialTheme.colorScheme.primary)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { showCategories = true }) {
+                Icon(Icons.Default.Label, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(6.dp))
+                Text(if (r.tags.isEmpty()) "Kategorie zuordnen" else r.tags.joinToString("  ") { "#$it" }, color = MaterialTheme.colorScheme.primary)
+            }
             SourceLink(r.url)
             r.error?.let { Note(it, error = true) }
             if (d != null && d.isRecipe && !LanguageDetector.isGerman(d)) {
@@ -317,6 +400,7 @@ fun DetailScreen(id: Long, onBack: () -> Unit, onRedo: () -> Unit, onEdit: () ->
     if (showShopping && r != null) AddToShoppingDialog(r.title, scaled) { showShopping = false }
     if (showPlan && r != null) AddToPlanDialog(r.id) { showPlan = false }
     shareText?.let { t -> ShareDialog("Rezept teilen", t, subject = r?.title) { shareText = null } }
+    if (showCategories && r != null) RecipeCategoryDialog(r.id) { showCategories = false }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -359,7 +443,7 @@ private fun AddToPlanDialog(recipeId: Long, onClose: () -> Unit) {
 }
 
 /** Quell-Link: Plattform-Name und vollstaendige Adresse, antippen oeffnet, lang druecken kopiert. */
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun SourceLink(url: String) {
     val ctx = LocalContext.current

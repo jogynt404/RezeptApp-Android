@@ -85,3 +85,21 @@ class PlanningTest {
         assertEquals("200 ml Brühe", IngredientMerger.forHousehold(r, 2).single().line())
     }
 }
+
+class CategoriesTest {
+    private fun r(id: Long, vararg tags: String) = Recipe(id = id, url = "u$id", title = "R$id", tags = tags.toList())
+
+    @org.junit.Test fun gruppieren() {
+        val g = Categories.group(listOf(r(1, "Vegan", "Schnell"), r(2, "schnell"), r(3)))
+        org.junit.Assert.assertEquals(listOf("Schnell", "Vegan", Categories.NONE), g.map { it.first })
+        org.junit.Assert.assertEquals(listOf(1L, 2L), g[0].second.map { it.id })
+        org.junit.Assert.assertEquals(listOf(3L), g[2].second.map { it.id })
+    }
+
+    @org.junit.Test fun umbenennenUndEntfernen() {
+        org.junit.Assert.assertEquals(listOf("Pasta", "Vegan"), Categories.rename(r(1, "Nudeln", "Vegan"), "nudeln", "Pasta").tags)
+        org.junit.Assert.assertEquals(listOf("vegan"), Categories.rename(r(1, "Nudeln", "Vegan"), "Nudeln", "vegan").tags)
+        org.junit.Assert.assertEquals(listOf("Vegan"), Categories.remove(r(1, "Schnell", "Vegan"), "schnell").tags)
+        org.junit.Assert.assertEquals(listOf("Vegan"), Categories.add(r(1, "Vegan"), "vegan").tags)
+    }
+}

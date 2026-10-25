@@ -37,6 +37,16 @@ object RecipeStore {
         reload()
     }
 
+    /** Aendert mehrere Rezepte auf einmal (z. B. Kategorie umbenennen). */
+    @Synchronized
+    fun updateAll(change: (Recipe) -> Recipe) {
+        _recipes.value.forEach { r ->
+            val n = change(r)
+            if (n != r) File(dir, "${n.id}.json").writeText(n.toJson().toString(2))
+        }
+        reload()
+    }
+
     @Synchronized
     fun delete(id: Long) {
         File(dir, "$id.json").delete()
@@ -70,6 +80,10 @@ class Settings(ctx: Context) {
     var planSlots: Set<String>
         get() = p.getStringSet("plan_slots", setOf("Abendessen")) ?: setOf("Abendessen")
         set(v) = p.edit().putStringSet("plan_slots", v).apply()
+
+    var groupedView: Boolean
+        get() = p.getBoolean("gruppiert", false)
+        set(v) = p.edit().putBoolean("gruppiert", v).apply()
 
     var assumeStaples: Boolean
         get() = p.getBoolean("grundzutaten", true)

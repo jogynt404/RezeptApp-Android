@@ -288,3 +288,27 @@ object ShoppingFormatter {
         return "$header\n\n$body"
     }
 }
+
+/** Rezepte nach Kategorien gruppieren und Kategorien verwalten. */
+object Categories {
+    const val NONE = "Ohne Kategorie"
+
+    /** Gruppen alphabetisch, "Ohne Kategorie" zuletzt. Ein Rezept kann in mehreren Gruppen stehen. */
+    fun group(recipes: List<Recipe>): List<Pair<String, List<Recipe>>> {
+        val tags = recipes.flatMap { it.tags }.distinctBy { it.lowercase() }.sortedBy { it.lowercase() }
+        val groups = tags.map { t -> t to recipes.filter { r -> r.tags.any { it.equals(t, true) } } }
+        val none = recipes.filter { it.tags.isEmpty() }
+        return if (none.isEmpty()) groups else groups + (NONE to none)
+    }
+
+    fun rename(r: Recipe, old: String, new: String): Recipe {
+        if (r.tags.none { it.equals(old, true) }) return r
+        val tags = r.tags.map { if (it.equals(old, true)) new.trim() else it }.filter { it.isNotBlank() }.distinctBy { it.lowercase() }
+        return r.copy(tags = tags)
+    }
+
+    fun remove(r: Recipe, tag: String) = r.copy(tags = r.tags.filterNot { it.equals(tag, true) })
+
+    fun add(r: Recipe, tag: String) =
+        if (tag.isBlank() || r.tags.any { it.equals(tag, true) }) r else r.copy(tags = r.tags + tag.trim())
+}
