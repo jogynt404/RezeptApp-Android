@@ -1,0 +1,12 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Kochtopf -->
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M32,50h44v18c0,6.6 -5.4,12 -12,12H44c-6.6,0 -12,-5.4 -12,-12z" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M26,47h56a2,2 0,0 1,2 2v1a2,2 0,0 1,-2 2H26a2,2 0,0 1,-2 -2v-1a2,2 0,0 1,2 -2z" />
+    <!-- Dampf -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="3.5" android:strokeLineCap="round"
+        android:pathData="M44,40c-3,-4 3,-6 0,-11M54,40c-3,-4 3,-6 0,-11M64,40c-3,-4 3,-6 0,-11" />
+</vector>
